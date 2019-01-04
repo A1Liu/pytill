@@ -41,25 +41,22 @@ def callable_from(placeholder):
     kwargs = kwargsof(placeholder)
     obj = kwargs.get('__call__') if '__call__' in kwargs else originof(placeholder)
     if isinstance(obj, type):
-        if Placeholder.self_compatible_inheritance:
-            return decorate_callable(placeholder, obj)
-        return obj
+        should_decorate = Placeholder.self_compatible_inheritance
+        return decorate_callable(placeholder, obj) if should_decorate else obj
     else:
         return obj.__call__
+
+def fail_handler(placeholder):
+    def handler(e,*args,**kwargs):
 
 def setorigin(placeholder, origin):
     ph_super(placeholder).__setattr__(__origin_attr__, origin )
 
 def setkwargs(placeholder, kwarg_dict):
     origin = originof( placeholder )
-    kwargs = {
-        '__class__':origin.__class__,}
-         #if origin is not None else None, # '__repr__':ph_getattr( placeholder,'__repr__' ), **kwarg_dict}
-    if __logger_kw_attr__ not in kwargs:
-        kwargs[__logger_kw_attr__] = getLogger( placeholder )
-    kwargs = {
-        key:value for key,value in kwargs.items()
-        if value is not DelAttr}
+    kwargs = { '__class__':origin.__class__, **kwarg_dict}
+    if __logger_kw_attr__ not in kwargs: kwargs[__logger_kw_attr__] = getLogger(placeholder)
+    kwargs = {key:value for key,value in kwargs.items() if value is not DelAttr}
     ph_super(placeholder).__setattr__(__kwargs_attr__, kwargs )
 
 class Placeholder():
@@ -96,25 +93,25 @@ class Placeholder():
         originof(self).__setitem__(key,value)
         loggerof(self).debug(f"Set item '{key}' to value '{value}'")
     def __delitem__(self, key):
+        value = originof(self).__getitem__(key)
         originof(self).__delitem__(key)
-        loggerof(self).debug(f"Deleted item using key '{key}'")
+        loggerof(self).debug(f"Deleted item '{value}' using key '{key}'")
 
     def __setattr__(self, name, value):
-        kwargs = kwargsof(self)
-        log,_ = ( "Keyword",kwargs.update({name:value}) ) if name in kwargs \
+        log,_ = ( "Keyword",kwargsof(self).update({name:value}) ) if name in kwargsof(self) \
                 else ( "Model",setattr(originof(self), name, value) )
         loggerof(self).debug("%s attribute '%s' set to '%s'" % (log, name, value) )
 
     def __call__(self, *args, **kwargs):
-        loggerof(self).debug("Function call with (args=%s, kwargs=%s)" % (args, kwargs) )
         func = callable_from(self)
         output = func(*args, **kwargs)
-        message = "Kwarg override" if '__call__' in kwargsof(self) else "Model"
-        loggerof(self).debug(message+f" called with output '{output}'")
+        message = "Function call with (*args=%s, **kwargs=%s):\n  %s called with output '%s'"
+        func_type = "Kwarg override" if '__call__' in kwargsof(self) else "Model"
+        loggerof(self).debug(message % (args, kwargs, func_type, output) )
         return output
 
     def __getattribute__(self, attribute):
-        output = kwargsof(self)[attribute] if attribute in kwargsof(self) \
+        output = kwargsof(self).get(attribute) if attribute in kwargsof(self) \
                 else getattr( originof(self), attribute )
         loggerof(self).debug("Attribute '%s' retrieved with value '%s'" % (attribute, output) )
         return output
@@ -123,7 +120,7 @@ class Placeholder():
         return repr_ph(self)
 
     def __str__(self):
-        return originof(self).__str__()
+        return str(originof(self))
 
 def add_placeholder(obj, attribute):
     # Usage:
