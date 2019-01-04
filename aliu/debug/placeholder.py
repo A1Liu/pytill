@@ -2,7 +2,7 @@ from .debug import getLogger as getLogger_basic, tryfail
 import logging,re
 
 __origin_attr__ = '__ph_origin__'
-__kwargs_attr__ = '__ph_kwargs__'
+__dict_attr__ = '__ph_dict__'
 __logger_kw_attr__ = '__ph_logger__'
 
 origin_format_string  = '<Placeholder object origin="%s">'
@@ -13,8 +13,8 @@ DelAttr = lambda: None # This class should never be instanced
 ph_super = lambda placeholder: super(Placeholder, placeholder)
 ph_getattr =   lambda ph,attr: ph_super(ph).__getattribute__( attr )
 originof = lambda placeholder: ph_getattr(placeholder,__origin_attr__)
-kwargsof = lambda placeholder: ph_getattr(placeholder,__kwargs_attr__)
-loggerof = lambda placeholder: kwargsof(placeholder).get(__logger_kw_attr__)
+dictof = lambda placeholder: ph_getattr(placeholder,__dict_attr__)
+loggerof = lambda placeholder: dictof(placeholder).get(__logger_kw_attr__)
 repr_origin =   lambda origin: origin_format_string % summarize_obj(origin)
 repr_ph =  lambda placeholder: repr_origin( originof(placeholder) )
 
@@ -29,8 +29,8 @@ def getLogger(obj, level = logging.DEBUG):
     return getLogger_basic(name,level)
 
 def decorate_callable(placeholder, func):
-    def decorated(*args, **kwargs):
-        output = func(*args, **kwargs)
+    def decorated(*args, **dict):
+        output = func(*args, **dict)
         if output is not None:
             logger = getLogger(repr_origin(output),loggerof(placeholder).level+1)
             output = Placeholder(output,**{'__class__': placeholder, __logger_kw_attr__:logger})
@@ -38,26 +38,25 @@ def decorate_callable(placeholder, func):
     return decorated
 
 def callable_from(placeholder):
-    kwargs = kwargsof(placeholder)
-    obj = kwargs.get('__call__') if '__call__' in kwargs else originof(placeholder)
+    dict = dictof(placeholder)
+    obj = dict.get('__call__') if '__call__' in dict else originof(placeholder)
     if isinstance(obj, type):
         should_decorate = Placeholder.self_compatible_inheritance
         return decorate_callable(placeholder, obj) if should_decorate else obj
     else:
         return obj.__call__
 
-def fail_handler(placeholder):
-    def handler(e,*args,**kwargs):
-
 def setorigin(placeholder, origin):
     ph_super(placeholder).__setattr__(__origin_attr__, origin )
 
-def setkwargs(placeholder, kwarg_dict):
-    origin = originof( placeholder )
-    kwargs = { '__class__':origin.__class__, **kwarg_dict}
-    if __logger_kw_attr__ not in kwargs: kwargs[__logger_kw_attr__] = getLogger(placeholder)
-    kwargs = {key:value for key,value in kwargs.items() if value is not DelAttr}
-    ph_super(placeholder).__setattr__(__kwargs_attr__, kwargs )
+def setdict(placeholder, dict):
+    if __logger_kw_attr__ not in dict: dict[__logger_kw_attr__] = getLogger(placeholder)
+    ph_super(placeholder).__setattr__(__dict_attr__, dict )
+
+def log_func(func, placeholder, message, *args, **kwargs):
+    output = func(*args, **kwargs)
+    loggerof(placeholder).debug( message.replace( '%(output)s',str(output) ) )
+    return output
 
 class Placeholder():
     """
@@ -78,47 +77,43 @@ class Placeholder():
     logging_format_string = logging_format_string
     self_compatible_inheritance = True
     originof = staticmethod(originof)
-    kwargsof = staticmethod(kwargsof)
+    dictof = staticmethod(dictof)
 
     def __init__(self, origin, **kwargs):
         setorigin(self, origin)
-        setkwargs(self, kwargs)
-        loggerof(self).debug(f"Initialized placeholder for object '{origin}' with kwargs={kwargs}")
-
-    def __getitem__(self, key):
-        output = originof(self).__getitem__(key)
-        loggerof(self).debug(f"Retrieved item '{output}' using key '{key}'")
-        return output
-    def __setitem__(self, key, value):
-        originof(self).__setitem__(key,value)
-        loggerof(self).debug(f"Set item '{key}' to value '{value}'")
-    def __delitem__(self, key):
-        value = originof(self).__getitem__(key)
-        originof(self).__delitem__(key)
-        loggerof(self).debug(f"Deleted item '{value}' using key '{key}'")
+        setdict(self, kwargs)
+        loggerof(self).debug(f"Initialized placeholder for object '{origin}' with {__dict_attr__}={kwargs}")
 
     def __setattr__(self, name, value):
-        log,_ = ( "Keyword",kwargsof(self).update({name:value}) ) if name in kwargsof(self) \
-                else ( "Model",setattr(originof(self), name, value) )
-        loggerof(self).debug("%s attribute '%s' set to '%s'" % (log, name, value) )
+        message = f" attribute '{name}' set to '{value}'"
+        if name in dictof(self):
+            return log_func(dictof(self).update, self, "Keyword"+message, {name:value})
+        return log_func(setattr, self, "Object"+message, originof(self), name, value)
 
     def __call__(self, *args, **kwargs):
         func = callable_from(self)
-        output = func(*args, **kwargs)
-        message = "Function call with (*args=%s, **kwargs=%s):\n  %s called with output '%s'"
-        func_type = "Kwarg override" if '__call__' in kwargsof(self) else "Model"
-        loggerof(self).debug(message % (args, kwargs, func_type, output) )
-        return output
+        func_type = "Kwarg override" if '__call__' in dictof(self) else "Model"
+        message = f"Function call with (*args={args}, **kwargs={kwargs}): " + \
+                  f"{func_type} called with output '%(output)s'"
+        return log_func(callable_from(self), self, message, *args, **kwargs)
 
     def __getattribute__(self, attribute):
-        output = kwargsof(self).get(attribute) if attribute in kwargsof(self) \
-                else getattr( originof(self), attribute )
-        loggerof(self).debug("Attribute '%s' retrieved with value '%s'" % (attribute, output) )
-        return output
+        prop_dict = dictof(self)
+        if attribute == __dict_attr__:
+            return log_func(lambda: prop_dict, self, f"Retrieved '{attribute}' (Placeholder property dictionary)." )
+        message = f"Retrieved <origin>.{attribute} with value '%(output)s'"
+        if attribute in prop_dict:
+            return log_func(dictof(self).get, self, message, attribute )
+        return log_func(getattr, self, message, originof(self), attribute )
 
+    def __getitem__(self, key):
+        return log_func(originof(self).__getitem__, self, f"Retrieved item '%(output)s' using key '{key}'", key)
+    def __setitem__(self, key, value):
+        log_func(originof(self).__setitem__, self,f"Set item '{key}' to value '{value}'", key, value )
+    def __delitem__(self, key):
+        logfunc(originof(self).__delitem__, self, f"Deleted item from <origin> using key '{key}'", key )
     def __repr__(self):
         return repr_ph(self)
-
     def __str__(self):
         return str(originof(self))
 
