@@ -1,5 +1,5 @@
 import asyncio
-from aliu.debug.placeholder import Placeholder, add_placeholder, originof
+from aliu.debug import Placeholder, add_placeholder
 
 def run_tasks(*tasks):
     asyncio.get_event_loop().run_until_complete(asyncio.gather(*tasks))

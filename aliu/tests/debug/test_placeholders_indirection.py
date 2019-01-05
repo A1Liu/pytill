@@ -1,4 +1,4 @@
-from aliu.debug.placeholder import Placeholder
+from aliu.debug import Placeholder
 import numpy as np
 
 def assert_origin_inheritance(origin):

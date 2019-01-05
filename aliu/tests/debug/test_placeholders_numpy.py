@@ -1,4 +1,4 @@
-from aliu.debug.placeholder import Placeholder, add_placeholder, originof
+from aliu.debug import Placeholder, add_placeholder
 import numpy as NUMPY_ORIGINAL_POINTER
 np = NUMPY_ORIGINAL_POINTER
 
@@ -8,7 +8,7 @@ def np_random(seed=42):
     random_array = np.random.random(100)
     return random_array
 
-def assert_rand_arrays(revert = originof):
+def assert_rand_arrays(revert = Placeholder.originof):
     global np
     array1 = np_random()
     np = revert(np)
@@ -31,7 +31,7 @@ def test_callable():
     original = np.random.random
     np.random.random = Placeholder(np.random.random)
     def revert(numpy):
-        numpy.random.random = originof(numpy.random.random)
+        numpy.random.random = Placeholder.originof(numpy.random.random)
         return numpy
     assert_rand_arrays(revert)
 
